@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Configurações{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow green">Parâmetros</span><h1>Veículo e limites</h1><p>Alterações recalculam todo o histórico.</p></div><div class="actions"><a class="button secondary" href="{% url 'download_backup' %}">Baixar backup SQLite</a></div></div>
+<form class="card form-card" method="post" novalidate>{% csrf_token %}<div class="form-grid">{% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><div class="actions"><button class="button" type="submit">Salvar configurações</button></div></form>
+{% endblock %}
+

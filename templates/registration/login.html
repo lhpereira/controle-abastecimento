@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}<form class="card form-card narrow" method="post">{% csrf_token %}<h1>Entrar</h1>{{ form.as_p }}<button class="button" type="submit">Entrar</button></form>{% endblock %}
+

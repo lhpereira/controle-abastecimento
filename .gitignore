@@ -150,6 +150,13 @@ activemq-data/
 # Environments
 .env
 .envrc
+
+# Controle de Abastecimento — dados locais e artefatos
+/data/
+/staticfiles/
+/.coverage
+/.pytest_cache/
+
 .venv
 env/
 venv/

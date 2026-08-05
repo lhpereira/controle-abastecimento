@@ -1,0 +1,39 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#145b43">
+  <title>{% block title %}Controle de Abastecimento{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'dashboard' %}">
+      <span class="brand-mark">CA</span>
+      <span><strong>Controle de Abastecimento</strong><small>Custo-benefício por mistura</small></span>
+    </a>
+    <button class="menu-button" type="button" aria-label="Abrir menu" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+    <nav class="nav">
+      <a href="{% url 'dashboard' %}">Visão geral</a>
+      <a href="{% url 'fueling_list' %}">Histórico</a>
+      <a href="{% url 'optimizer' %}">Otimizador</a>
+      <a href="{% url 'vehicle_settings' %}">Configurações</a>
+      <a class="button small" href="{% url 'fueling_create' %}">+ Abastecimento</a>
+    </nav>
+  </header>
+
+  {% if messages %}
+    <div class="messages">
+      {% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}
+    </div>
+  {% endif %}
+
+  <main class="page">{% block content %}{% endblock %}</main>
+  <footer class="footer">Dados locais em SQLite · cálculos reproduzíveis · {{ request.get_host }}</footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
+

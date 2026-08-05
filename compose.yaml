@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-change-this-before-exposing-the-app}"
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost:8000}"
+      APP_TIME_ZONE: "${APP_TIME_ZONE:-America/Cuiaba}"
+      APP_REQUIRE_LOGIN: "${APP_REQUIRE_LOGIN:-False}"
+      SQLITE_PATH: /app/data/db.sqlite3
+      BACKUP_DIR: /app/data/backups
+    volumes:
+      - fuel_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  fuel_data:
+

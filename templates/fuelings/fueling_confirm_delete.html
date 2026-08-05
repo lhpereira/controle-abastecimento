@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Excluir abastecimento{% endblock %}
+{% block content %}<section class="card confirm"><h1>Excluir abastecimento?</h1><p>{{ row.date|date:"d/m/Y" }} · {{ row.station }} · {{ row.odometer_km }} km</p><p>Os registros posteriores serão recalculados.</p><form method="post">{% csrf_token %}<div class="actions"><a class="button secondary" href="{% url 'fueling_detail' row.pk %}">Cancelar</a><button class="button danger" type="submit">Excluir</button></div></form></section>{% endblock %}
+

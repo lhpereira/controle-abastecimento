@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{% if instance %}Editar{% else %}Novo{% endif %} abastecimento{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow green">Entrada de dados</span><h1>{% if instance %}Editar abastecimento{% else %}Novo abastecimento{% endif %}</h1><p>Os indicadores serão recalculados automaticamente a partir deste ponto.</p></div></div>
+<form class="card form-card" method="post" novalidate>{% csrf_token %}
+  {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="form-grid">{% for field in form %}<div class="field {% if field.name == 'notes' %}wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div>
+  <div class="form-note">O cálculo considera que o abastecimento completa o tanque de {{ vehicle.tank_capacity_l }} litros.</div>
+  <div class="actions"><a class="button secondary" href="{% if instance %}{% url 'fueling_detail' instance.pk %}{% else %}{% url 'fueling_list' %}{% endif %}">Cancelar</a><button class="button" type="submit">Salvar e recalcular</button></div>
+</form>
+{% endblock %}
+

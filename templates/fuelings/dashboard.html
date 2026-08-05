@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load formatting %}
+{% block title %}Visão geral · Controle de Abastecimento{% endblock %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <span class="eyebrow">Análise de custo-benefício</span>
+    <h1>{{ vehicle.name }}</h1>
+    <p>Eficiência, custo por quilômetro e composição real do combustível.</p>
+  </div>
+  <a class="button light" href="{% url 'fueling_create' %}">Registrar abastecimento</a>
+</section>
+
+{% if not rows %}
+<section class="empty card">
+  <h2>Comece pelo primeiro abastecimento</h2>
+  <p>Cadastre manualmente ou use o comando de importação descrito no README.</p>
+  <a class="button" href="{% url 'fueling_create' %}">Cadastrar agora</a>
+</section>
+{% else %}
+<section class="decision">
+  <div><span class="eyebrow">Decisão mais recente</span><h2>{{ latest.recommendation }}</h2></div>
+  <p>A relação etanol/gasolina está em <strong>{{ latest.price_ratio|percent:2 }}</strong>, contra limite aplicável de <strong>{{ latest.applicable_limit|percent:2 }}</strong>. Margem: <strong class="{{ latest.margin_to_limit|positive_class }}">{{ latest.margin_to_limit|percent:2 }}</strong>.</p>
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi"><small>Distância analisada</small><strong>{{ overall.distance|br_number:0 }} km</strong><span>{{ overall.count }} ciclos completos</span></article>
+  <article class="kpi"><small>Gasto registrado</small><strong>{{ total_paid|money:2 }}</strong><span>todos os abastecimentos</span></article>
+  <article class="kpi"><small>Consumo ponderado</small><strong>{{ overall.efficiency|br_number:2 }} km/L</strong><span>quilômetros ÷ litros repostos</span></article>
+  <article class="kpi"><small>Custo ponderado</small><strong>{{ overall.cost_per_km|money:3 }}/km</strong><span>combustível efetivamente consumido</span></article>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Principais leituras</span><h2>O que os registros indicam</h2></div></div>
+  <div class="insight-grid">
+    <article class="card insight positive-border"><small>Cidade</small><strong>{% if city_saving != None %}{{ city_saving|percent:1 }} menor{% else %}—{% endif %}</strong><p>Diferença de custo/km do etanol dominante contra gasolina dominante.{% if city_saving_1000 != None %} Economia equivalente a {{ city_saving_1000|money:0 }} por 1.000 km.{% endif %}</p></article>
+    <article class="card insight blue-border"><small>Custo urbano × gasolina C</small><strong>r = {{ city_cost_correlation|br_number:2 }}</strong><p>Associação observada entre participação de gasolina C consumida e custo por quilômetro.</p></article>
+    <article class="card insight amber-border"><small>Composição atual</small><strong>{{ latest.ethanol_total_tank_share|percent:1 }} etanol</strong><p>Inclui etanol hidratado abastecido e etanol anidro presente na gasolina C.</p></article>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Mistura e desempenho</span><h2>Eficiência e custo por composição consumida</h2></div><p>O eixo horizontal representa o combustível consumido no ciclo, e não apenas a compra feita ao final.</p></div>
+  <div class="chart-grid">
+    <article class="card chart-card"><h3>Eficiência por gasolina C consumida</h3><canvas id="efficiencyChart"></canvas></article>
+    <article class="card chart-card"><h3>Custo/km por gasolina C consumida</h3><canvas id="costChart"></canvas></article>
+    <article class="card chart-card"><h3>Custo por faixa de mistura</h3><canvas id="bandChart"></canvas></article>
+    <article class="card chart-card"><h3>Eficiência por trajeto</h3><canvas id="routeChart"></canvas></article>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Preço e composição</span><h2>Evolução dos abastecimentos</h2></div></div>
+  <div class="chart-grid">
+    <article class="card chart-card"><h3>Relação de preços × limite aplicável</h3><canvas id="ratioChart"></canvas></article>
+    <article class="card chart-card"><h3>Composição do tanque</h3><canvas id="compositionChart"></canvas></article>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Limite pessoal</span><h2>Cobertura por tipo de trajeto</h2></div><a href="{% url 'optimizer' %}">Abrir otimizador →</a></div>
+  <div class="table-wrap"><table><thead><tr><th>Trajeto</th><th>km/L etanol dominante</th><th>km/L gasolina dominante</th><th>Limite pessoal</th><th>Amostras</th></tr></thead><tbody>
+  {% for item in personal_limits %}<tr><td><strong>{{ item.route }}</strong></td><td>{{ item.ethanol_kml|br_number:2 }}</td><td>{{ item.gasoline_kml|br_number:2 }}</td><td>{{ item.personal|percent:2 }}</td><td>{{ item.ethanol_count }} etanol · {{ item.gasoline_count }} gasolina</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Registros</span><h2>Abastecimentos recentes</h2></div><a href="{% url 'fueling_list' %}">Ver histórico completo →</a></div>
+  <div class="table-wrap"><table><thead><tr><th>Data</th><th>Posto</th><th>Trajeto</th><th>Distância</th><th>Consumo</th><th>Custo/km</th><th>Decisão</th></tr></thead><tbody>
+  {% for row in recent_rows %}<tr><td><a href="{% url 'fueling_detail' row.pk %}">{{ row.date|date:"d/m/Y" }}</a></td><td>{{ row.station }}</td><td>{{ row.route }}</td><td>{{ row.distance_km|default_if_none:"—" }} km</td><td>{{ row.efficiency_km_l|br_number:2 }} km/L</td><td>{{ row.cost_per_km|money:3 }}</td><td><span class="badge {{ row.recommendation|lower }}">{{ row.recommendation }}</span></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+{{ chart_data|json_script:"dashboard-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}{% if rows %}
+<script>
+const data = JSON.parse(document.getElementById('dashboard-data').textContent);
+const colors = {Cidade:'#286a9b', Misto:'#7651a8', Estrada:'#e48b31'};
+const baseOptions = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{color:'#edf1ee'}}, y:{grid:{color:'#edf1ee'}}}};
+function scatterDatasets(points) {
+  return Object.keys(colors).map(route => ({label:route, data:points.filter(p=>p.route===route), backgroundColor:colors[route], pointRadius:5, pointHoverRadius:7}));
+}
+new Chart(document.getElementById('efficiencyChart'), {type:'scatter', data:{datasets:scatterDatasets(data.efficiency)}, options:{...baseOptions, scales:{x:{title:{display:true,text:'Gasolina C consumida (%)'},min:0,max:100},y:{title:{display:true,text:'km/L'}}}}});
+new Chart(document.getElementById('costChart'), {type:'scatter', data:{datasets:scatterDatasets(data.cost)}, options:{...baseOptions, scales:{x:{title:{display:true,text:'Gasolina C consumida (%)'},min:0,max:100},y:{title:{display:true,text:'R$/km'}}}}});
+new Chart(document.getElementById('bandChart'), {type:'bar', data:{labels:data.bands.labels,datasets:[{label:'R$/km',data:data.bands.values,backgroundColor:['#35a87e','#e48b31','#286a9b'],borderRadius:8}]}, options:baseOptions});
+new Chart(document.getElementById('routeChart'), {type:'bar', data:{labels:data.routes.labels,datasets:[{label:'km/L',data:data.routes.values,backgroundColor:['#286a9b','#7651a8','#e48b31'],borderRadius:8}]}, options:baseOptions});
+new Chart(document.getElementById('ratioChart'), {type:'line', data:{labels:data.ratio.labels,datasets:[{label:'Etanol/gasolina',data:data.ratio.values,borderColor:'#35a87e',backgroundColor:'#35a87e22',fill:true,tension:.25},{label:'Limite aplicável',data:data.ratio.limits,borderColor:'#e48b31',borderDash:[6,5],pointRadius:0}]},options:{...baseOptions,scales:{y:{title:{display:true,text:'Percentual (%)'}}}}});
+new Chart(document.getElementById('compositionChart'), {type:'bar',data:{labels:data.composition.labels,datasets:[{label:'Gasolina A',data:data.composition.gasoline_a,backgroundColor:'#286a9b'},{label:'Etanol anidro',data:data.composition.anhydrous,backgroundColor:'#e3a632'},{label:'Etanol hidratado',data:data.composition.hydrated,backgroundColor:'#35a87e'}]},options:{...baseOptions,scales:{x:{stacked:true},y:{stacked:true,max:100,title:{display:true,text:'Composição (%)'}}}}});
+</script>
+{% endif %}{% endblock %}
+

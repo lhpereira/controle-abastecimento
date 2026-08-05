@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% load formatting %}
+{% block title %}Abastecimento de {{ row.date|date:"d/m/Y" }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="eyebrow green">Ciclo calculado</span><h1>{{ row.station }}</h1><p>{{ row.date|date:"d/m/Y" }} · {{ row.route }} · hodômetro {{ row.odometer_km|br_number:0 }} km</p></div><div class="actions"><a class="button secondary" href="{% url 'fueling_update' row.pk %}">Editar</a><a class="button danger" href="{% url 'fueling_delete' row.pk %}">Excluir</a></div></div>
+<div class="detail-grid">
+  <section class="card"><h2>Compra</h2><dl><dt>Gasolina</dt><dd>{{ row.gasoline_liters|br_number:3 }} L × {{ row.gasoline_price|money:3 }}</dd><dt>Etanol</dt><dd>{{ row.ethanol_liters|br_number:3 }} L × {{ row.ethanol_price|money:3 }}</dd><dt>Total</dt><dd>{{ row.total_liters|br_number:3 }} L</dd><dt>Valor pago</dt><dd>{{ row.amount_paid|money:2 }}</dd><dt>Teor anidro</dt><dd>{{ row.anhydrous_rate|percent:1 }}</dd></dl></section>
+  <section class="card"><h2>Ciclo anterior</h2><dl><dt>Distância</dt><dd>{{ row.distance_km|default_if_none:"—" }} km</dd><dt>Consumo</dt><dd>{{ row.efficiency_km_l|br_number:2 }} km/L</dd><dt>Gasolina C consumida</dt><dd>{{ row.burned_gas_c_share|percent:2 }}</dd><dt>Preço queimado</dt><dd>{{ row.burned_price_per_liter|money:3 }}</dd><dt>Custo/km</dt><dd>{{ row.cost_per_km|money:3 }}</dd></dl></section>
+  <section class="card"><h2>Tanque após abastecer</h2><dl><dt>Gasolina A</dt><dd>{{ row.gasoline_a_tank_share|percent:2 }}</dd><dt>Etanol anidro</dt><dd>{{ row.ethanol_anhydrous_tank_share|percent:2 }}</dd><dt>Etanol hidratado</dt><dd>{{ row.ethanol_hydrated_tank_share|percent:2 }}</dd><dt>Etanol total</dt><dd>{{ row.ethanol_total_tank_share|percent:2 }}</dd><dt>Custo médio</dt><dd>{{ row.tank_cost_per_liter|money:3 }}/L</dd></dl></section>
+  <section class="card"><h2>Decisão de preço</h2><dl><dt>Relação de preços</dt><dd>{{ row.price_ratio|percent:2 }}</dd><dt>Limite aplicável</dt><dd>{{ row.applicable_limit|percent:2 }}</dd><dt>Limite pessoal</dt><dd>{{ row.personal_limit|percent:2 }}</dd><dt>Margem</dt><dd>{{ row.margin_to_limit|percent:2 }}</dd><dt>Resultado</dt><dd><span class="badge {{ row.recommendation|lower }}">{{ row.recommendation }}</span></dd></dl></section>
+</div>
+{% if row.notes %}<section class="card notes"><h2>Observações</h2><p>{{ row.notes|linebreaksbr }}</p></section>{% endif %}
+{% endblock %}
+
