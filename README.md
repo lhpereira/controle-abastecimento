@@ -10,7 +10,8 @@ O projeto reproduz a lógica validada na planilha **Controle Abastecimento**: ca
 - Composição do tanque: gasolina A, etanol anidro e etanol hidratado.
 - Consumo em km/L, preço do litro consumido e custo por quilômetro.
 - Limites oficial, pessoal e faixa de decisão neutra.
-- Dashboard responsivo com gráficos de eficiência, custo e composição.
+- Dashboard responsivo com filtros (período, trajeto e faixa de mistura, refletidos na URL), gráficos de eficiência e custo com linhas de tendência, evolução por ciclo, gasto mensal, relação de preços e composição do tanque. Cada gráfico traz uma explicação de como lê-lo.
+- Leituras automáticas: economia do etanol, sensibilidade do consumo à mistura, tendência de custo/km e mistura de menor custo por trajeto com os últimos preços.
 - Otimizador por tipo de trajeto, com requisito mínimo de cobertura da amostra.
 - Importação de JSON, XLSX e CSV.
 - Exportação para CSV e download de backup SQLite (somente superusuário).
@@ -44,7 +45,31 @@ docker compose logs -f app
 
 O SQLite fica no volume Docker `fuel_data`. Recriar o container não remove o banco, mas o volume não substitui um backup externo.
 
-## Executar localmente
+## Desenvolvimento com Docker Desktop
+
+O ambiente de desenvolvimento não exige Python instalado. O código local é montado no container e o servidor recarrega a cada alteração. O banco fica no volume `fuel_dev_data`, separado do volume de produção.
+
+```bash
+docker compose -f compose.dev.yaml up --build
+```
+
+Acesse `http://localhost:8000`. O login também é obrigatório em desenvolvimento: crie um usuário com o `createsuperuser` abaixo. Comandos úteis, com o ambiente em execução:
+
+```bash
+docker compose -f compose.dev.yaml exec app python manage.py test
+```
+
+```bash
+docker compose -f compose.dev.yaml exec app python manage.py seed_demo --replace
+```
+
+```bash
+docker compose -f compose.dev.yaml exec app python manage.py createsuperuser
+```
+
+O `seed_demo` gera dados fictícios no banco de desenvolvimento e apaga os registros existentes nele. Para parar e descartar o banco de desenvolvimento: `docker compose -f compose.dev.yaml down -v`.
+
+## Executar localmente (sem Docker)
 
 Requer Python 3.12 ou superior.
 

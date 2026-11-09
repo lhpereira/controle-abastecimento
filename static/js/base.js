@@ -5,3 +5,8 @@ document.querySelectorAll("[data-menu-toggle]").forEach((button) => {
     button.setAttribute("aria-expanded", String(open));
   });
 });
+
+// Formulários com data-autosubmit são enviados ao alterar qualquer campo (ex.: filtros do dashboard).
+document.querySelectorAll("form[data-autosubmit]").forEach((form) => {
+  form.addEventListener("change", () => form.requestSubmit());
+});

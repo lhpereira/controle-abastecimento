@@ -28,7 +28,7 @@ def superuser_required(view):
 
 
 def dashboard(request):
-    return render(request, "fuelings/dashboard.html", dashboard_context(get_default_vehicle()))
+    return render(request, "fuelings/dashboard.html", dashboard_context(get_default_vehicle(), request.GET))
 
 
 def fueling_list(request):

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load formatting static %}
+{% load static formatting %}
 {% block title %}Visão geral · Controle de Abastecimento{% endblock %}
 
 {% block content %}
@@ -21,37 +21,111 @@
 {% else %}
 <section class="decision">
   <div><span class="eyebrow">Decisão mais recente</span><h2>{{ latest.recommendation }}</h2></div>
-  <p>A relação etanol/gasolina está em <strong>{{ latest.price_ratio|percent:2 }}</strong>, contra limite aplicável de <strong>{{ latest.applicable_limit|percent:2 }}</strong>. Margem: <strong class="{{ latest.margin_to_limit|positive_class }}">{{ latest.margin_to_limit|percent:2 }}</strong>.</p>
+  <p>A relação etanol/gasolina está em <strong>{{ latest.price_ratio|percent:2 }}</strong>, contra limite aplicável de <strong>{{ latest.applicable_limit|percent:2 }}</strong> ({{ latest.route }}). Margem: <strong class="{{ latest.margin_to_limit|positive_class }}">{{ latest.margin_to_limit|percent:2 }}</strong>. Abaixo do limite, o etanol tende a compensar; acima, a gasolina.</p>
 </section>
 
+<form id="dashboardFilters" class="filters dash-filters" method="get" action="{% url 'dashboard' %}" data-autosubmit>
+  <label>Período
+    <select name="periodo">{% for key, label in period_choices %}<option value="{{ key }}"{% if key == filters.period %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  </label>
+  <fieldset class="chip-group"><legend>Trajeto</legend>
+    {% for value, label in route_choices %}<label class="chip"><input type="checkbox" name="trajeto" value="{{ value }}"{% if value in filters.routes %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}
+  </fieldset>
+  <label>Mistura consumida
+    <select name="faixa"><option value="">Todas as faixas</option>{% for value, label in band_choices %}<option value="{{ value }}"{% if value == filters.band %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  </label>
+  <div class="filter-summary">
+    <strong>{{ interval_count }}</strong> ciclos analisados{% if filtered %} de {{ total_count }}{% endif %}
+    {% if filtered %}<a href="{% url 'dashboard' %}">Limpar filtros</a>{% endif %}
+    <noscript><button class="button small" type="submit">Aplicar</button></noscript>
+  </div>
+</form>
+
+{% if interval_count == 0 %}
+<section class="card empty"><h2>Nenhum ciclo com esses filtros</h2><p>Amplie o período ou remova algum filtro de trajeto ou mistura.</p><a class="button secondary" href="{% url 'dashboard' %}">Limpar filtros</a></section>
+{% else %}
 <section class="kpi-grid">
   <article class="kpi"><small>Distância analisada</small><strong>{{ overall.distance|br_number:0 }} km</strong><span>{{ overall.count }} ciclos completos</span></article>
-  <article class="kpi"><small>Gasto registrado</small><strong>{{ total_paid|money:2 }}</strong><span>todos os abastecimentos</span></article>
-  <article class="kpi"><small>Consumo ponderado</small><strong>{{ overall.efficiency|br_number:2 }} km/L</strong><span>quilômetros ÷ litros repostos</span></article>
+  <article class="kpi"><small>Gasto registrado</small><strong>{{ total_paid|money:2 }}</strong><span>abastecimentos do filtro</span></article>
+  <article class="kpi"><small>Consumo ponderado</small><strong>{{ overall.efficiency|br_number:2 }} km/L</strong><span>km totais ÷ litros repostos</span></article>
   <article class="kpi"><small>Custo ponderado</small><strong>{{ overall.cost_per_km|money:3 }}/km</strong><span>combustível efetivamente consumido</span></article>
 </section>
 
 <section class="section">
-  <div class="section-title"><div><span class="eyebrow green">Principais leituras</span><h2>O que os registros indicam</h2></div></div>
+  <div class="section-title"><div><span class="eyebrow green">Principais leituras</span><h2>O que os registros indicam</h2></div><p>Os números mudam conforme os filtros acima.</p></div>
   <div class="insight-grid">
-    <article class="card insight positive-border"><small>Cidade</small><strong>{% if city_saving != None %}{{ city_saving|percent:1 }} menor{% else %}—{% endif %}</strong><p>Diferença de custo/km do etanol dominante contra gasolina dominante.{% if city_saving_1000 != None %} Economia equivalente a {{ city_saving_1000|money:0 }} por 1.000 km.{% endif %}</p></article>
-    <article class="card insight blue-border"><small>Custo urbano × gasolina C</small><strong>r = {{ city_cost_correlation|br_number:2 }}</strong><p>Associação observada entre participação de gasolina C consumida e custo por quilômetro.</p></article>
-    <article class="card insight amber-border"><small>Composição atual</small><strong>{{ latest.ethanol_total_tank_share|percent:1 }} etanol</strong><p>Inclui etanol hidratado abastecido e etanol anidro presente na gasolina C.</p></article>
+    <article class="card insight positive-border"><small>Etanol × gasolina na cidade</small><strong>{% if city_saving != None %}{% if city_saving >= 0 %}{{ city_saving|percent:1 }} menor{% else %}{{ city_saving_abs|percent:1 }} maior{% endif %}{% else %}—{% endif %}</strong><p>{% if city_saving != None %}Custo/km do etanol dominante contra gasolina dominante (ciclos com ≤20% ou ≥80% de gasolina C).{% if city_saving_1000 != None %} Equivale a {{ city_saving_1000|money:0 }} por 1.000 km.{% endif %}{% else %}Faltam ciclos urbanos com etanol dominante e com gasolina dominante nesse filtro.{% endif %}</p></article>
+    <article class="card insight blue-border"><small>Custo urbano × gasolina C</small><strong>r = {{ city_cost_correlation|br_number:2 }}</strong><p>{{ city_correlation_text }} Varia de −1 a +1; perto de zero não há relação.</p></article>
+    <article class="card insight amber-border"><small>Composição atual do tanque</small><strong>{{ latest.ethanol_total_tank_share|percent:1 }} etanol</strong><p>Soma o etanol hidratado abastecido e o anidro presente na gasolina C (≈{{ latest.anhydrous_rate|percent:0 }}). Reflete o último abastecimento, não o filtro.</p></article>
+    {% for item in insights %}
+    <article class="card insight {{ item.tone }}-border"><small>{{ item.title }}</small><strong>{{ item.value }}</strong><p>{{ item.text }}{% if item.pk %} <a href="{% url 'fueling_detail' item.pk %}">Ver registro</a>{% endif %}</p></article>
+    {% endfor %}
   </div>
 </section>
 
+{% if ideal_mix %}
 <section class="section">
-  <div class="section-title"><div><span class="eyebrow green">Mistura e desempenho</span><h2>Eficiência e custo por composição consumida</h2></div><p>O eixo horizontal representa o combustível consumido no ciclo, e não apenas a compra feita ao final.</p></div>
+  <div class="section-title"><div><span class="eyebrow green">Mistura de menor custo</span><h2>Com os preços do último abastecimento</h2></div><p>Estimativa do otimizador por trajeto, a {{ latest.gasoline_price|money:2 }}/L de gasolina e {{ latest.ethanol_price|money:2 }}/L de etanol. <a href="{% url 'optimizer' %}">Simular outros preços →</a></p></div>
+  <div class="insight-grid">
+    {% for card in ideal_mix %}
+    <article class="card insight {% if card.ready %}positive-border{% else %}muted-border{% endif %}"><small>{{ card.route }}</small>
+      {% if card.ready %}
+      <strong>{{ card.best.gasoline_share|percent:0 }} gasolina · {{ card.best.ethanol_share|percent:0 }} etanol</strong>
+      <p>Custo estimado de {{ card.best.cost_per_km|money:3 }}/km a {{ card.best.efficiency|br_number:2 }} km/L.{% if card.balanced and card.balanced.gasoline_share != card.best.gasoline_share %} Aceitando até {{ vehicle.optimizer_tolerance|percent:0 }} a mais de custo, {{ card.balanced.gasoline_share|percent:0 }} de gasolina rende mais km/L ({{ card.balanced.efficiency|br_number:2 }}).{% endif %} Base: {{ card.count }} ciclos, R² {{ card.r2|br_number:2 }}.{% if card.r2 != None and card.r2 < 0.2 %} R² baixo: use como indicativo.{% endif %}</p>
+      {% else %}
+      <strong>Sem estimativa</strong><p>{{ card.status }}.{% if card.count %} Base atual: {{ card.count }} ciclos.{% endif %}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Mistura e desempenho</span><h2>Como a mistura consumida afeta consumo e custo</h2></div>
+    <label class="switch"><input type="checkbox" id="trendToggle" checked><span>Linhas de tendência</span></label></div>
+  <details class="how-to" open><summary>Como ler estes gráficos</summary>
+    <p>Cada ponto é um <strong>ciclo</strong>: o intervalo entre dois abastecimentos de tanque cheio. O eixo horizontal mostra quanta <strong>gasolina C</strong> havia no tanque durante o ciclo (0% = só etanol, 100% = só gasolina), não o que foi comprado no fim. A linha tracejada é a tendência linear de cada trajeto; o <strong>R²</strong> na legenda indica quanto da variação a mistura explica (perto de 1, muito; perto de 0, pouco). Clique na legenda para ocultar um trajeto e em um ponto para abrir o registro.</p>
+  </details>
   <div class="chart-grid">
-    <article class="card chart-card"><h3>Eficiência por gasolina C consumida</h3><canvas id="efficiencyChart"></canvas></article>
-    <article class="card chart-card"><h3>Custo/km por gasolina C consumida</h3><canvas id="costChart"></canvas></article>
-    <article class="card chart-card"><h3>Custo por faixa de mistura</h3><canvas id="bandChart"></canvas></article>
-    <article class="card chart-card"><h3>Eficiência por trajeto</h3><canvas id="routeChart"></canvas></article>
+    <article class="card chart-card"><h3>Eficiência (km/L) por gasolina C consumida</h3><canvas id="efficiencyChart"></canvas></article>
+    <article class="card chart-card"><h3>Custo por km (R$) por gasolina C consumida</h3><canvas id="costChart"></canvas></article>
   </div>
 </section>
 
 <section class="section">
-  <div class="section-title"><div><span class="eyebrow green">Preço e composição</span><h2>Evolução dos abastecimentos</h2></div></div>
+  <div class="section-title"><div><span class="eyebrow green">Comparativo</span><h2>Faixa de mistura × trajeto</h2></div>
+    <div class="segment-bar">
+      <div class="segmented" data-segment="matrix-metric" role="group" aria-label="Métrica"><button type="button" data-value="cost_per_km" aria-pressed="true">Custo/km</button><button type="button" data-value="efficiency" aria-pressed="false">km/L</button></div>
+      <div class="segmented" data-segment="matrix-group" role="group" aria-label="Agrupamento"><button type="button" data-value="band" aria-pressed="true">Por mistura</button><button type="button" data-value="route" aria-pressed="false">Por trajeto</button></div>
+    </div>
+  </div>
+  <details class="how-to"><summary>Como ler este gráfico</summary>
+    <p>Agrupa os ciclos em <strong>etanol dominante</strong> (até 20% de gasolina C), <strong>mistura</strong> (20–80%) e <strong>gasolina dominante</strong> (80% ou mais). Os valores são ponderados (quilômetros e litros somados, não média simples dos ciclos). Passe o mouse para ver quantos ciclos e quilômetros sustentam cada barra: barras com poucos ciclos merecem cautela. Ausência de barra significa que não há ciclos naquela combinação.</p>
+  </details>
+  <article class="card chart-card wide-chart"><canvas id="matrixChart"></canvas></article>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Evolução</span><h2>Consumo, custo e gasto ao longo do tempo</h2></div>
+    <div class="segmented" data-segment="timeline" role="group" aria-label="Métrica do ciclo"><button type="button" data-value="efficiency" aria-pressed="true">km/L</button><button type="button" data-value="cost" aria-pressed="false">Custo/km</button></div>
+  </div>
+  <details class="how-to"><summary>Como ler estes gráficos</summary>
+    <p><strong>Evolução por ciclo:</strong> cada ponto é um ciclo, colorido pelo trajeto; a linha verde é a média móvel de três ciclos e suaviza as oscilações. <strong>Gasto mensal:</strong> as barras somam o que foi pago em abastecimentos no mês; a linha vermelha é o custo/km ponderado dos ciclos fechados naquele mês. Clique em um ponto do primeiro gráfico para abrir o registro.</p>
+  </details>
+  <div class="chart-grid">
+    <article class="card chart-card"><h3>Evolução por ciclo</h3><canvas id="timelineChart"></canvas></article>
+    <article class="card chart-card"><h3>Gasto mensal e custo/km</h3><canvas id="monthlyChart"></canvas></article>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title"><div><span class="eyebrow green">Preço e composição</span><h2>Quando o etanol compensou e o que havia no tanque</h2></div>
+    <div class="segmented" data-segment="ratio" role="group" aria-label="Visão de preços"><button type="button" data-value="ratio" aria-pressed="true">Relação</button><button type="button" data-value="prices" aria-pressed="false">Preços R$/L</button></div>
+  </div>
+  <details class="how-to"><summary>Como ler estes gráficos</summary>
+    <p><strong>Relação etanol/gasolina:</strong> preço do etanol ÷ preço da gasolina na bomba. O limite aplicável (cinza tracejado) é o ponto de equilíbrio do veículo; a faixa laranja é a zona neutra, onde a decisão é indiferente. Pontos <span class="dot green"></span>verdes ficaram abaixo da faixa (etanol compensava), <span class="dot blue"></span>azuis acima (gasolina compensava) e <span class="dot amber"></span>laranja dentro dela. <strong>Composição do tanque:</strong> mostra a fração de gasolina A, etanol anidro (já misturado na gasolina C) e etanol hidratado após cada abastecimento.</p>
+  </details>
   <div class="chart-grid">
     <article class="card chart-card"><h3>Relação de preços × limite aplicável</h3><canvas id="ratioChart"></canvas></article>
     <article class="card chart-card"><h3>Composição do tanque</h3><canvas id="compositionChart"></canvas></article>
@@ -59,9 +133,12 @@
 </section>
 
 <section class="section">
-  <div class="section-title"><div><span class="eyebrow green">Limite pessoal</span><h2>Cobertura por tipo de trajeto</h2></div><a href="{% url 'optimizer' %}">Abrir otimizador →</a></div>
-  <div class="table-wrap"><table><thead><tr><th>Trajeto</th><th>km/L etanol dominante</th><th>km/L gasolina dominante</th><th>Limite pessoal</th><th>Amostras</th></tr></thead><tbody>
-  {% for item in personal_limits %}<tr><td><strong>{{ item.route }}</strong></td><td>{{ item.ethanol_kml|br_number:2 }}</td><td>{{ item.gasoline_kml|br_number:2 }}</td><td>{{ item.personal|percent:2 }}</td><td>{{ item.ethanol_count }} etanol · {{ item.gasoline_count }} gasolina</td></tr>{% endfor %}
+  <div class="section-title"><div><span class="eyebrow green">Limite pessoal</span><h2>Seu ponto de equilíbrio por trajeto</h2></div><a href="{% url 'optimizer' %}">Abrir otimizador →</a></div>
+  <details class="how-to"><summary>O que é o limite pessoal</summary>
+    <p>É a razão entre o km/L com etanol dominante e o km/L com gasolina dominante. Se o preço do etanol for menor que essa fração do preço da gasolina, o etanol sai mais barato <em>para o seu carro e o seu trajeto</em>. Quando fica abaixo do limite oficial do fabricante, a regra geral dos 70% superestima o benefício do etanol no seu uso.</p>
+  </details>
+  <div class="table-wrap"><table><thead><tr><th>Trajeto</th><th>km/L etanol</th><th>km/L gasolina</th><th>Custo/km etanol</th><th>Custo/km gasolina</th><th>Economia</th><th>Limite pessoal</th><th>Limite oficial</th><th>Amostras</th></tr></thead><tbody>
+  {% for item in personal_limits %}<tr><td><strong>{{ item.route }}</strong></td><td>{{ item.ethanol_kml|br_number:2 }}</td><td>{{ item.gasoline_kml|br_number:2 }}</td><td>{{ item.ethanol_cost|money:3 }}</td><td>{{ item.gasoline_cost|money:3 }}</td><td class="{{ item.saving|positive_class }}">{{ item.saving|percent:1 }}</td><td>{{ item.personal|percent:2 }}</td><td>{{ item.official|percent:2 }}{% if item.gap != None %} <small class="{{ item.gap|positive_class }}">({% if item.gap >= 0 %}+{% endif %}{{ item.gap|percent:1 }})</small>{% endif %}</td><td>{{ item.ethanol_count }} etanol · {{ item.gasoline_count }} gasolina</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 
@@ -74,9 +151,12 @@
 
 {{ chart_data|json_script:"dashboard-data" }}
 {% endif %}
+{% endif %}
 {% endblock %}
 
 {% block scripts %}{% if rows %}
+{% if interval_count %}
 <script src="{% static 'vendor/chartjs/chart.umd.js' %}"></script>
 <script src="{% static 'js/dashboard.js' %}"></script>
+{% endif %}
 {% endif %}{% endblock %}
