@@ -1,12 +1,21 @@
+import csv
+import os
+import sqlite3
+import subprocess
+import sys
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
+from django.conf import settings
+from django.contrib.auth.models import User
 from django.http import QueryDict
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 
 from .analytics import dashboard_context, linear_fit, optimizer_model, parse_filters
 from .models import Fueling, Vehicle
+from .security import client_ip, csv_safe
 from .services import recalculate_all
 
 
@@ -57,11 +66,6 @@ class CalculationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
-    @override_settings(APP_REQUIRE_LOGIN=True)
-    def test_optional_login_protection(self):
-        response = self.client.get("/")
-        self.assertRedirects(response, "/conta/login/?next=%2F", fetch_redirect_response=False)
-        self.assertEqual(self.client.get("/health/").status_code, 200)
 
 
 class OptimizerTests(TestCase):
@@ -117,6 +121,7 @@ class DashboardFilterTests(TestCase):
                 ethanol_price=Decimal("4.30"),
             )
         recalculate_all(self.vehicle)
+        self.client.force_login(User.objects.create_user("dono"))
 
     def context(self, query=""):
         return dashboard_context(self.vehicle, QueryDict(query))
@@ -158,3 +163,206 @@ class DashboardFilterTests(TestCase):
         fit = linear_fit([(0, 1), (1, 3), (2, 5)])
         self.assertAlmostEqual(fit["slope"], 2)
         self.assertAlmostEqual(fit["r2"], 1)
+
+def make_row(vehicle, **overrides):
+    values = {
+        "vehicle": vehicle,
+        "date": date(2026, 3, 8),
+        "station": "Posto teste",
+        "route": Fueling.Route.CITY,
+        "air_conditioning": Fueling.AirConditioning.ALWAYS,
+        "odometer_km": 38180,
+        "gasoline_liters": Decimal("38"),
+        "gasoline_price": Decimal("6.39"),
+        "ethanol_liters": Decimal("0"),
+        "ethanol_price": Decimal("4.19"),
+    }
+    values.update(overrides)
+    return Fueling.objects.create(**values)
+
+
+class AuthenticationTests(TestCase):
+    """SEG-01 / SEG-05 / SEG-09."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("dono", password="senha-de-teste-longa")
+
+    def test_every_page_requires_login(self):
+        for url in ["/", "/abastecimentos/", "/abastecimentos/novo/", "/configuracoes/",
+                    "/otimizador/", "/exportar/csv/", "/backup/"]:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response["Location"].startswith("/conta/login/"))
+
+    def test_public_endpoints(self):
+        self.assertEqual(self.client.get("/health/").json(), {"status": "ok"})
+        self.assertEqual(self.client.get("/conta/login/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/login/").status_code, 200)
+
+    def test_password_reset_routes_are_not_exposed(self):
+        self.client.force_login(self.user)
+        for url in ["/conta/password_reset/", "/conta/password_change/", "/conta/reset/done/"]:
+            self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_logout_button_ends_session(self):
+        self.client.force_login(self.user)
+        page = self.client.get("/abastecimentos/")
+        self.assertContains(page, 'action="/conta/logout/"')
+        self.client.post("/conta/logout/")
+        self.assertEqual(self.client.get("/abastecimentos/").status_code, 302)
+
+    def test_login_page_has_no_navigation_for_anonymous(self):
+        self.assertNotContains(self.client.get("/conta/login/"), "/conta/logout/")
+
+    def test_brute_force_lockout(self):
+        for _ in range(settings.AXES_FAILURE_LIMIT):
+            self.client.post("/conta/login/", {"username": "dono", "password": "errada"})
+        response = self.client.post("/conta/login/", {"username": "dono", "password": "senha-de-teste-longa"})
+        self.assertEqual(response.status_code, 429)
+        self.assertContains(response, "temporariamente bloqueado", status_code=429)
+
+    def test_successful_login(self):
+        response = self.client.post("/conta/login/", {"username": "dono", "password": "senha-de-teste-longa"})
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+
+
+class ClientIpTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def request(self, remote, cf_ip):
+        return self.factory.get("/", REMOTE_ADDR=remote, HTTP_CF_CONNECTING_IP=cf_ip)
+
+    @override_settings(APP_BEHIND_CLOUDFLARE=True)
+    def test_uses_cloudflare_header_from_tunnel(self):
+        self.assertEqual(client_ip(self.request("172.18.0.1", "203.0.113.7")), "203.0.113.7")
+
+    @override_settings(APP_BEHIND_CLOUDFLARE=True)
+    def test_ignores_header_from_external_address(self):
+        self.assertEqual(client_ip(self.request("8.8.8.8", "203.0.113.7")), "8.8.8.8")
+
+    @override_settings(APP_BEHIND_CLOUDFLARE=False)
+    def test_ignores_header_when_not_behind_cloudflare(self):
+        self.assertEqual(client_ip(self.request("127.0.0.1", "203.0.113.7")), "127.0.0.1")
+
+
+class BackupTests(TestCase):
+    """SEG-02."""
+
+    def setUp(self):
+        self.vehicle = Vehicle.objects.create(name="Carro")
+        make_row(self.vehicle)
+        self.admin = User.objects.create_superuser("admin", password="senha-de-teste-longa")
+        self.common = User.objects.create_user("comum", password="senha-de-teste-longa")
+
+    def test_common_user_is_forbidden(self):
+        self.client.force_login(self.common)
+        self.assertEqual(self.client.get("/backup/").status_code, 403)
+
+    def test_superuser_backup_has_data_but_no_sessions(self):
+        self.client.force_login(self.admin)
+        response = self.client.get("/backup/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        backup = sqlite3.connect(":memory:")
+        backup.deserialize(response.content)
+        self.assertEqual(backup.execute("SELECT COUNT(*) FROM fuelings_fueling").fetchone()[0], 1)
+        self.assertEqual(backup.execute("SELECT COUNT(*) FROM django_session").fetchone()[0], 0)
+        self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertNotIn(self.client.session.session_key.encode(), response.content)
+
+    def test_backup_button_only_for_superuser(self):
+        self.client.force_login(self.common)
+        self.assertNotContains(self.client.get("/configuracoes/"), "/backup/")
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get("/configuracoes/"), "/backup/")
+
+
+class CsvExportTests(TestCase):
+    """SEG-07."""
+
+    def test_csv_safe(self):
+        self.assertEqual(csv_safe('=HYPERLINK("x")'), "'=HYPERLINK(\"x\")")
+        for prefix in "+-@\t\r":
+            self.assertTrue(csv_safe(prefix + "1").startswith("'"))
+        self.assertEqual(csv_safe("Posto Shell"), "Posto Shell")
+        self.assertEqual(csv_safe(Decimal("-1.5")), Decimal("-1.5"))
+
+    def test_export_neutralizes_formulas(self):
+        vehicle = Vehicle.objects.create(name="Carro")
+        make_row(vehicle, station='=HYPERLINK("http://x";"clique")')
+        recalculate_all(vehicle)
+        self.client.force_login(User.objects.create_user("dono"))
+        content = self.client.get("/exportar/csv/").content.decode("utf-8-sig")
+        row = list(csv.reader(content.splitlines(), delimiter=";"))[1]
+        self.assertEqual(row[1], "'=HYPERLINK(\"http://x\";\"clique\")")
+
+
+class ContentSecurityPolicyTests(TestCase):
+    """SEG-06."""
+
+    def setUp(self):
+        vehicle = Vehicle.objects.create(name="Carro")
+        make_row(vehicle)
+        make_row(vehicle, odometer_km=38500, date=date(2026, 3, 15), gasoline_liters=Decimal("30"))
+        recalculate_all(vehicle)
+        self.client.force_login(User.objects.create_user("dono"))
+
+    def test_policy_header(self):
+        policy = self.client.get("/conta/login/")["Content-Security-Policy"]
+        self.assertIn("script-src 'self'", policy)
+        self.assertIn("frame-ancestors 'none'", policy)
+
+    def test_pages_use_only_local_scripts(self):
+        for url in ["/", "/otimizador/"]:
+            with self.subTest(url=url):
+                html = self.client.get(url).content.decode()
+                self.assertNotIn("cdn.jsdelivr.net", html)
+                self.assertNotIn("onclick=", html)
+                # Só JSON de dados (json_script) pode aparecer como script sem src.
+                self.assertNotRegex(html, r"<script>(?!\s*$)")
+        self.assertIn("vendor/chartjs/chart.umd.js", self.client.get("/").content.decode())
+
+    def test_vendored_chartjs_exists(self):
+        self.assertTrue((Path(settings.BASE_DIR) / "static/vendor/chartjs/chart.umd.js").is_file())
+
+    def test_production_collectstatic(self):
+        """O storage com manifest (produção) falha se um arquivo referenciado não existir."""
+        import tempfile
+
+        from django.core.management import call_command
+
+        storages = {**settings.STORAGES, "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"}}
+        with tempfile.TemporaryDirectory() as root, override_settings(STATIC_ROOT=root, STORAGES=storages):
+            call_command("collectstatic", interactive=False, verbosity=0)
+            self.assertTrue((Path(root) / "staticfiles.json").is_file())
+
+
+class SecretKeyTests(TestCase):
+    """SEG-03: sem DEBUG, o settings recusa chave ausente ou de exemplo."""
+
+    def load_settings(self, **env):
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("DJANGO_")}
+        clean_env.update(env)
+        return subprocess.run(
+            [sys.executable, "-c", "import config.settings"],
+            cwd=settings.BASE_DIR, env=clean_env, capture_output=True, text=True,
+        )
+
+    def test_missing_key_is_rejected(self):
+        result = self.load_settings()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_SECRET_KEY", result.stderr)
+
+    def test_example_key_is_rejected(self):
+        result = self.load_settings(DJANGO_SECRET_KEY="change-me-generate-a-long-random-secret")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_strong_key_is_accepted(self):
+        result = self.load_settings(DJANGO_SECRET_KEY="k" * 20 + "abcdefghijklmnopqrstuvwxyz0123456789")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_debug_allows_missing_key(self):
+        self.assertEqual(self.load_settings(DJANGO_DEBUG="True").returncode, 0)

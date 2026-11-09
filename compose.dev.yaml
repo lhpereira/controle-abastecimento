@@ -12,14 +12,13 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py runserver 0.0.0.0:8000"
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     environment:
       DJANGO_SECRET_KEY: dev-only-insecure-key
       DJANGO_DEBUG: "True"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
       DJANGO_CSRF_TRUSTED_ORIGINS: "http://localhost:${APP_PORT:-8000}"
       APP_TIME_ZONE: "${APP_TIME_ZONE:-America/Cuiaba}"
-      APP_REQUIRE_LOGIN: "False"
       SQLITE_PATH: /app/data/db.sqlite3
       BACKUP_DIR: /app/data/backups
       PYTHONDONTWRITEBYTECODE: "1"

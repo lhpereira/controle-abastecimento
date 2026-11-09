@@ -15,14 +15,17 @@
       <span class="brand-mark">CA</span>
       <span><strong>Controle de Abastecimento</strong><small>Custo-benefício por mistura</small></span>
     </a>
-    <button class="menu-button" type="button" aria-label="Abrir menu" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+    {% if user.is_authenticated %}
+    <button class="menu-button" type="button" aria-label="Abrir menu" aria-expanded="false" data-menu-toggle>☰</button>
     <nav class="nav">
       <a href="{% url 'dashboard' %}">Visão geral</a>
       <a href="{% url 'fueling_list' %}">Histórico</a>
       <a href="{% url 'optimizer' %}">Otimizador</a>
       <a href="{% url 'vehicle_settings' %}">Configurações</a>
       <a class="button small" href="{% url 'fueling_create' %}">+ Abastecimento</a>
+      <form class="logout-form" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="button small secondary" type="submit" title="Sair ({{ user.get_username }})">Sair</button></form>
     </nav>
+    {% endif %}
   </header>
 
   {% if messages %}
@@ -33,6 +36,7 @@
 
   <main class="page">{% block content %}{% endblock %}</main>
   <footer class="footer">Dados locais em SQLite · cálculos reproduzíveis · {{ request.get_host }}</footer>
+  <script src="{% static 'js/base.js' %}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

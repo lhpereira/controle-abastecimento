@@ -11,3 +11,6 @@
 .switch{display:inline-flex;align-items:center;gap:8px;font-weight:700;color:#405047;cursor:pointer}.switch input{width:auto}
 .wide-chart{min-height:380px}.wide-chart canvas{height:330px!important}
 @media(max-width:700px){.dash-filters{position:static}.filter-summary{margin-left:0}.segment-bar{margin-top:12px}.segmented{margin-top:12px}.section-title .switch{margin-top:12px}}
+
+.logout-form{margin:0;display:flex}
+.logout-form .button{width:100%}

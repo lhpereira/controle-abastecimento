@@ -2,14 +2,18 @@ services:
   app:
     build: .
     ports:
-      - "${APP_PORT:-8000}:8000"
+      # Publica só no loopback por padrão: o acesso externo passa pelo Cloudflare Tunnel.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8000"
     environment:
-      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-change-this-before-exposing-the-app}"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Defina DJANGO_SECRET_KEY no arquivo .env}"
       DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}"
       DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost:8000}"
       APP_TIME_ZONE: "${APP_TIME_ZONE:-America/Cuiaba}"
-      APP_REQUIRE_LOGIN: "${APP_REQUIRE_LOGIN:-False}"
+      APP_BEHIND_CLOUDFLARE: "${APP_BEHIND_CLOUDFLARE:-False}"
+      SECURE_HSTS_SECONDS: "${SECURE_HSTS_SECONDS:-0}"
+      AXES_FAILURE_LIMIT: "${AXES_FAILURE_LIMIT:-5}"
+      AXES_COOLOFF_MINUTES: "${AXES_COOLOFF_MINUTES:-60}"
       SQLITE_PATH: /app/data/db.sqlite3
       BACKUP_DIR: /app/data/backups
     volumes:

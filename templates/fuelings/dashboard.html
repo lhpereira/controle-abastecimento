@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static formatting %}
 {% block title %}Visão geral · Controle de Abastecimento{% endblock %}
-{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>{% endblock %}
+
 {% block content %}
 <section class="hero">
   <div>
@@ -24,7 +24,7 @@
   <p>A relação etanol/gasolina está em <strong>{{ latest.price_ratio|percent:2 }}</strong>, contra limite aplicável de <strong>{{ latest.applicable_limit|percent:2 }}</strong> ({{ latest.route }}). Margem: <strong class="{{ latest.margin_to_limit|positive_class }}">{{ latest.margin_to_limit|percent:2 }}</strong>. Abaixo do limite, o etanol tende a compensar; acima, a gasolina.</p>
 </section>
 
-<form id="dashboardFilters" class="filters dash-filters" method="get" action="{% url 'dashboard' %}">
+<form id="dashboardFilters" class="filters dash-filters" method="get" action="{% url 'dashboard' %}" data-autosubmit>
   <label>Período
     <select name="periodo">{% for key, label in period_choices %}<option value="{{ key }}"{% if key == filters.period %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
   </label>
@@ -155,6 +155,8 @@
 {% endblock %}
 
 {% block scripts %}{% if rows %}
-<script>document.getElementById('dashboardFilters').addEventListener('change', function () { this.requestSubmit(); });</script>
-{% if interval_count %}<script src="{% static 'js/dashboard.js' %}"></script>{% endif %}
+{% if interval_count %}
+<script src="{% static 'vendor/chartjs/chart.umd.js' %}"></script>
+<script src="{% static 'js/dashboard.js' %}"></script>
+{% endif %}
 {% endif %}{% endblock %}

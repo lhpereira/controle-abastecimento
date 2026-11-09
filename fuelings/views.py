@@ -1,15 +1,30 @@
 import csv
-from datetime import date
+from functools import wraps
 
 from django.contrib import messages
+from django.contrib.auth.decorators import login_not_required
+from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from .analytics import dashboard_context, optimizer_model
+from .backup import sanitized_sqlite_backup
 from .forms import FuelingForm, OptimizerForm, VehicleForm
 from .models import Fueling
+from .security import csv_safe
 from .services import get_default_vehicle, recalculate_all
+
+
+def superuser_required(view):
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not (request.user.is_active and request.user.is_superuser):
+            raise PermissionDenied
+        return view(request, *args, **kwargs)
+
+    return wrapper
 
 
 def dashboard(request):
@@ -103,7 +118,7 @@ def optimizer(request):
 def export_csv(request):
     vehicle = get_default_vehicle()
     response = HttpResponse(content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = f'attachment; filename="abastecimentos-{date.today():%Y-%m-%d}.csv"'
+    response["Content-Disposition"] = f'attachment; filename="abastecimentos-{timezone.localdate():%Y-%m-%d}.csv"'
     response.write("\ufeff")
     writer = csv.writer(response, delimiter=";")
     writer.writerow(
@@ -114,28 +129,27 @@ def export_csv(request):
         ]
     )
     for row in vehicle.fuelings.all():
-        writer.writerow(
-            [
-                row.date.strftime("%d/%m/%Y"), row.station, row.route, row.air_conditioning,
-                row.odometer_km, row.gasoline_liters, row.gasoline_price, row.ethanol_liters,
-                row.ethanol_price, row.anhydrous_rate, row.distance_km, row.efficiency_km_l,
-                row.burned_gas_c_share, row.cost_per_km, row.recommendation,
-            ]
-        )
+        values = [
+            row.date.strftime("%d/%m/%Y"), row.station, row.route, row.air_conditioning,
+            row.odometer_km, row.gasoline_liters, row.gasoline_price, row.ethanol_liters,
+            row.ethanol_price, row.anhydrous_rate, row.distance_km, row.efficiency_km_l,
+            row.burned_gas_c_share, row.cost_per_km, row.recommendation,
+        ]
+        writer.writerow([csv_safe(value) for value in values])
     return response
 
 
+@superuser_required
 def download_backup(request):
-    connection.ensure_connection()
-    raw_connection = connection.connection
-    if not hasattr(raw_connection, "serialize"):
-        return HttpResponse("Backup online não suportado por esta versão do SQLite.", status=501)
-    payload = raw_connection.serialize()
-    response = HttpResponse(payload, content_type="application/x-sqlite3")
-    response["Content-Disposition"] = f'attachment; filename="controle-abastecimento-{date.today():%Y-%m-%d}.sqlite3"'
+    response = HttpResponse(sanitized_sqlite_backup(), content_type="application/vnd.sqlite3")
+    response["Content-Disposition"] = (
+        f'attachment; filename="controle-abastecimento-{timezone.localdate():%Y-%m-%d}.sqlite3"'
+    )
+    response["Cache-Control"] = "no-store"
     return response
 
 
+@login_not_required
 def health(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT 1")
