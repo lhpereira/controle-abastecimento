@@ -366,3 +366,154 @@ class SecretKeyTests(TestCase):
 
     def test_debug_allows_missing_key(self):
         self.assertEqual(self.load_settings(DJANGO_DEBUG="True").returncode, 0)
+
+
+class DerivedValueGuardTests(TestCase):
+    """DAD-01: um erro de digitação não pode tornar o histórico ilegível."""
+
+    PAGES = ["/", "/abastecimentos/", "/otimizador/", "/exportar/csv/"]
+
+    def setUp(self):
+        self.vehicle = Vehicle.objects.create(name="Carro")
+        make_row(self.vehicle, odometer_km=38180, date=date(2026, 3, 8))
+        make_row(self.vehicle, odometer_km=38500, date=date(2026, 3, 15), gasoline_liters=Decimal("30"))
+        recalculate_all(self.vehicle)
+        self.user = User.objects.create_superuser("dono", password="senha-de-teste-longa")
+        self.client.force_login(self.user)
+
+    def form_data(self, **overrides):
+        data = {
+            "date": "2026-03-22", "station": "Posto", "route": Fueling.Route.CITY,
+            "air_conditioning": Fueling.AirConditioning.ALWAYS, "odometer_km": "38800",
+            "gasoline_type": Fueling.GasolineType.COMMON, "gasoline_liters": "30", "gasoline_price": "6.39",
+            "ethanol_liters": "0", "ethanol_price": "4.19", "anhydrous_percent": "30", "notes": "",
+        }
+        data.update(overrides)
+        return data
+
+    def assert_pages_ok(self):
+        for url in self.PAGES:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_normal_fueling_is_saved(self):
+        response = self.client.post("/abastecimentos/novo/", self.form_data())
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Fueling.objects.count(), 3)
+
+    def test_odometer_typo_asks_for_confirmation(self):
+        response = self.client.post("/abastecimentos/novo/", self.form_data(odometer_km="385000"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Os valores parecem fora do comum")
+        self.assertContains(response, "346.500 km rodados")
+        self.assertContains(response, 'name="confirm_unusual"')
+        self.assertEqual(Fueling.objects.count(), 2)
+        self.assert_pages_ok()
+
+    def test_confirmation_field_hidden_by_default(self):
+        self.assertNotContains(self.client.get("/abastecimentos/novo/"), 'name="confirm_unusual"')
+
+    def test_confirmed_unusual_cycle_is_saved(self):
+        # 2.500 km com 30 L: fora do comum (83 km/L), mas cabe nas colunas.
+        response = self.client.post(
+            "/abastecimentos/novo/", self.form_data(odometer_km="41000", confirm_unusual="on")
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assert_pages_ok()
+
+    def test_overflow_is_blocked_even_when_confirmed(self):
+        response = self.client.post(
+            "/abastecimentos/novo/", self.form_data(odometer_km="900000", gasoline_liters="1", confirm_unusual="on")
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "fora da faixa que o sistema consegue armazenar")
+        self.assertEqual(Fueling.objects.count(), 2)
+        self.assert_pages_ok()
+
+    def test_editing_checks_the_following_cycle(self):
+        first = Fueling.objects.get(odometer_km=38180)
+        response = self.client.post(
+            f"/abastecimentos/{first.pk}/editar/", self.form_data(odometer_km="38490", date="2026-03-08")
+        )
+        self.assertContains(response, "Até o abastecimento seguinte")
+
+    def test_unrealistic_pump_price_is_rejected(self):
+        response = self.client.post("/abastecimentos/novo/", self.form_data(gasoline_price="0.001", ethanol_price="9"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Fueling.objects.count(), 2)
+        self.assertIn("gasoline_price", response.context["form"].errors)
+        self.assertContains(response, "entre R$ 0,50 e R$ 30,00")
+        self.assert_pages_ok()
+
+    def test_vehicle_settings_overflow_is_reported(self):
+        data = {
+            "name": "Carro", "brand": "x", "model": "x", "year": "2023", "tank_capacity_l": "0.001",
+            "official_city_limit": "0.7", "official_mixed_limit": "0.7", "official_road_limit": "0.7",
+            "neutral_band_percent": "3", "optimizer_tolerance_percent": "5",
+        }
+        response = self.client.post("/configuracoes/", data)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "As configurações não foram salvas")
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.tank_capacity_l, Decimal("41"))
+        self.assert_pages_ok()
+
+    def test_guard_rejects_value_that_rounds_up_to_the_limit(self):
+        from .services import DerivedValueOutOfRange, ensure_storable
+
+        row = Fueling.objects.first()
+        row.price_ratio = Decimal("9999.999999999")  # arredonda para 10000,00000000
+        with self.assertRaises(DerivedValueOutOfRange):
+            ensure_storable(row, ["price_ratio"])
+        row.price_ratio = Decimal("1E+40")  # grande demais até para quantize()
+        with self.assertRaises(DerivedValueOutOfRange):
+            ensure_storable(row, ["price_ratio"])
+
+    def corrupt(self, odometer_km):
+        """Simula um banco gravado pela versão antiga: valor que o Django não consegue ler."""
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE fuelings_fueling SET efficiency_km_l = 12790.5 WHERE odometer_km = %s", [odometer_km])
+            cursor.execute("UPDATE fuelings_fueling SET price_ratio = 9000 WHERE odometer_km = %s", [odometer_km])
+
+    def test_repair_command_restores_a_corrupted_database(self):
+        from django.core.management import call_command
+
+        expected = list(Fueling.objects.values_list("odometer_km", "efficiency_km_l", "price_ratio"))
+        self.corrupt(38500)
+        self.client.raise_request_exception = False
+        self.assertEqual(self.client.get("/").status_code, 500)
+        call_command("repair_derived", stdout=open(os.devnull, "w"))
+        self.assertEqual(list(Fueling.objects.values_list("odometer_km", "efficiency_km_l", "price_ratio")), expected)
+        self.assert_pages_ok()
+
+    def test_repair_command_points_to_the_bad_record(self):
+        from django.core.management import CommandError, call_command
+
+        bad = make_row(self.vehicle, odometer_km=900000, date=date(2026, 4, 1), gasoline_liters=Decimal("1"))
+        self.corrupt(900000)
+        with self.assertRaisesMessage(CommandError, f"repair_derived --delete {bad.pk}"):
+            call_command("repair_derived", stdout=open(os.devnull, "w"))
+        # As colunas ficaram limpas: o registro já pode ser aberto para correção.
+        self.assertEqual(self.client.get(f"/abastecimentos/{bad.pk}/editar/").status_code, 200)
+        call_command("repair_derived", delete=bad.pk, stdout=open(os.devnull, "w"))
+        self.assertEqual(Fueling.objects.count(), 2)
+        self.assert_pages_ok()
+
+    def test_import_with_overflow_is_cancelled(self):
+        import tempfile
+
+        from django.core.management import CommandError, call_command
+
+        header = "Data;Posto;Trajeto;Uso A/C;Hodômetro;Litros gasolina;Preço gasolina;Litros etanol;Preço etanol;Teor anidro"
+        lines = [header, "01/04/2026;P;Cidade;Sempre;900000;1;6;0;4;0.30"]
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", encoding="utf-8", delete=False) as source:
+            source.write("\n".join(lines))
+        try:
+            with self.assertRaisesMessage(CommandError, "Importação cancelada"):
+                call_command("import_fuelings", source.name, stdout=open(os.devnull, "w"))
+        finally:
+            os.unlink(source.name)
+        self.assertEqual(Fueling.objects.count(), 2)
+        self.assert_pages_ok()

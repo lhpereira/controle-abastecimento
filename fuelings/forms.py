@@ -5,7 +5,36 @@ from django import forms
 from .models import Fueling, Vehicle
 
 
+# Faixas de um ciclo plausível (tanque cheio a tanque cheio). Fora delas o valor
+# provavelmente foi digitado errado; o usuário pode confirmar se estiver correto.
+CYCLE_DISTANCE_KM = (1, 2000)
+CYCLE_EFFICIENCY_KM_L = (Decimal("2"), Decimal("40"))
+
+
+def _br(value, places=0):
+    return f"{value:,.{places}f}".replace(",", "§").replace(".", ",").replace("§", ".")
+
+
+def cycle_issues(label, start_km, end_km, liters):
+    """Problemas de plausibilidade de um ciclo: distância percorrida e consumo resultante."""
+    issues = []
+    distance = end_km - start_km
+    low, high = CYCLE_DISTANCE_KM
+    if not low <= distance <= high:
+        issues.append(f"{label}: {_br(distance)} km rodados (o esperado é entre {low} e {_br(high)} km).")
+    if liters and liters > 0:
+        efficiency = Decimal(distance) / liters
+        low, high = CYCLE_EFFICIENCY_KM_L
+        if not low <= efficiency <= high:
+            issues.append(f"{label}: consumo de {_br(efficiency, 1)} km/L (o esperado é entre {low} e {high} km/L).")
+    return issues
+
+
 class FuelingForm(forms.ModelForm):
+    confirm_unusual = forms.BooleanField(
+        label="Confirmo que os valores estão corretos, mesmo fora do comum",
+        required=False,
+    )
     anhydrous_percent = forms.DecimalField(
         label="Etanol anidro na gasolina C (%)",
         min_value=0,
@@ -41,7 +70,9 @@ class FuelingForm(forms.ModelForm):
 
     def __init__(self, *args, vehicle=None, **kwargs):
         self.vehicle = vehicle
+        self.needs_confirmation = False
         super().__init__(*args, **kwargs)
+        self.order_fields([name for name in self.fields if name != "confirm_unusual"] + ["confirm_unusual"])
         rate = self.instance.anhydrous_rate if self.instance and self.instance.pk else Decimal("0.30")
         self.fields["anhydrous_percent"].initial = rate * 100
 
@@ -53,7 +84,41 @@ class FuelingForm(forms.ModelForm):
                 raise forms.ValidationError(
                     f"O total informado supera o tanque de {self.vehicle.tank_capacity_l} L."
                 )
+            self._check_cycle_plausibility(cleaned, total)
         return cleaned
+
+    def _check_cycle_plausibility(self, cleaned, total):
+        odometer = cleaned.get("odometer_km")
+        if odometer is None:
+            return
+        # .only(): lê só colunas de entrada, que continuam legíveis mesmo se algum valor
+        # derivado estiver corrompido no banco.
+        others = Fueling.objects.filter(vehicle=self.vehicle).only(
+            "odometer_km", "date", "gasoline_liters", "ethanol_liters"
+        )
+        if self.instance.pk:
+            others = others.exclude(pk=self.instance.pk)
+        previous = others.filter(odometer_km__lt=odometer).order_by("-odometer_km").first()
+        following = others.filter(odometer_km__gt=odometer).order_by("odometer_km").first()
+
+        issues = []
+        if previous:
+            label = f"Desde o abastecimento de {previous.date:%d/%m/%Y} ({_br(previous.odometer_km)} km)"
+            issues += cycle_issues(label, previous.odometer_km, odometer, total)
+        if following:
+            label = f"Até o abastecimento seguinte, de {following.date:%d/%m/%Y} ({_br(following.odometer_km)} km)"
+            issues += cycle_issues(
+                label, odometer, following.odometer_km, following.gasoline_liters + following.ethanol_liters
+            )
+        if not issues:
+            return
+        self.needs_confirmation = True
+        if not cleaned.get("confirm_unusual"):
+            raise forms.ValidationError(
+                ["Os valores parecem fora do comum. Confira o hodômetro e os litros:"]
+                + issues
+                + ["Se estiverem corretos, marque a confirmação no fim do formulário e salve de novo."]
+            )
 
     def save(self, commit=True):
         instance = super().save(commit=False)
