@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% load formatting %}
+{% load formatting static %}
 {% block title %}Visão geral · Controle de Abastecimento{% endblock %}
-{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>{% endblock %}
+
 {% block content %}
 <section class="hero">
   <div>
@@ -77,19 +77,6 @@
 {% endblock %}
 
 {% block scripts %}{% if rows %}
-<script>
-const data = JSON.parse(document.getElementById('dashboard-data').textContent);
-const colors = {Cidade:'#286a9b', Misto:'#7651a8', Estrada:'#e48b31'};
-const baseOptions = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{color:'#edf1ee'}}, y:{grid:{color:'#edf1ee'}}}};
-function scatterDatasets(points) {
-  return Object.keys(colors).map(route => ({label:route, data:points.filter(p=>p.route===route), backgroundColor:colors[route], pointRadius:5, pointHoverRadius:7}));
-}
-new Chart(document.getElementById('efficiencyChart'), {type:'scatter', data:{datasets:scatterDatasets(data.efficiency)}, options:{...baseOptions, scales:{x:{title:{display:true,text:'Gasolina C consumida (%)'},min:0,max:100},y:{title:{display:true,text:'km/L'}}}}});
-new Chart(document.getElementById('costChart'), {type:'scatter', data:{datasets:scatterDatasets(data.cost)}, options:{...baseOptions, scales:{x:{title:{display:true,text:'Gasolina C consumida (%)'},min:0,max:100},y:{title:{display:true,text:'R$/km'}}}}});
-new Chart(document.getElementById('bandChart'), {type:'bar', data:{labels:data.bands.labels,datasets:[{label:'R$/km',data:data.bands.values,backgroundColor:['#35a87e','#e48b31','#286a9b'],borderRadius:8}]}, options:baseOptions});
-new Chart(document.getElementById('routeChart'), {type:'bar', data:{labels:data.routes.labels,datasets:[{label:'km/L',data:data.routes.values,backgroundColor:['#286a9b','#7651a8','#e48b31'],borderRadius:8}]}, options:baseOptions});
-new Chart(document.getElementById('ratioChart'), {type:'line', data:{labels:data.ratio.labels,datasets:[{label:'Etanol/gasolina',data:data.ratio.values,borderColor:'#35a87e',backgroundColor:'#35a87e22',fill:true,tension:.25},{label:'Limite aplicável',data:data.ratio.limits,borderColor:'#e48b31',borderDash:[6,5],pointRadius:0}]},options:{...baseOptions,scales:{y:{title:{display:true,text:'Percentual (%)'}}}}});
-new Chart(document.getElementById('compositionChart'), {type:'bar',data:{labels:data.composition.labels,datasets:[{label:'Gasolina A',data:data.composition.gasoline_a,backgroundColor:'#286a9b'},{label:'Etanol anidro',data:data.composition.anhydrous,backgroundColor:'#e3a632'},{label:'Etanol hidratado',data:data.composition.hydrated,backgroundColor:'#35a87e'}]},options:{...baseOptions,scales:{x:{stacked:true},y:{stacked:true,max:100,title:{display:true,text:'Composição (%)'}}}}});
-</script>
+<script src="{% static 'vendor/chartjs/chart.umd.js' %}"></script>
+<script src="{% static 'js/dashboard.js' %}"></script>
 {% endif %}{% endblock %}
-

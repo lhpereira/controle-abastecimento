@@ -1,6 +1,5 @@
-{% extends "base.html" %}{% load formatting %}
+{% extends "base.html" %}{% load formatting static %}
 {% block title %}Otimizador de mistura{% endblock %}
-{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>{% endblock %}
 {% block content %}
 <div class="page-header"><div><span class="eyebrow green">Cenário de bomba</span><h1>Otimizador de mistura</h1><p>Estima a proporção com menor custo e o compromisso com maior eficiência.</p></div></div>
 <form class="card optimizer-form" method="post">{% csrf_token %}{% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}<button class="button" type="submit">Calcular cenário</button></form>
@@ -10,5 +9,7 @@
 {{ result|json_script:"optimizer-data" }}
 {% endif %}
 {% endblock %}
-{% block scripts %}{% if result.ready %}<script>const model=JSON.parse(document.getElementById('optimizer-data').textContent);new Chart(document.getElementById('optimizerChart'),{type:'line',data:{labels:model.grid.map(x=>Math.round(x.gasoline_share*100)),datasets:[{label:'Custo (R$/km)',data:model.grid.map(x=>x.cost_per_km),borderColor:'#35a87e',yAxisID:'cost',tension:.2},{label:'Eficiência (km/L)',data:model.grid.map(x=>x.efficiency),borderColor:'#286a9b',yAxisID:'efficiency',tension:.2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'Gasolina C na mistura (%)'}},cost:{position:'left',title:{display:true,text:'R$/km'}},efficiency:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'km/L'}}}}});</script>{% endif %}{% endblock %}
-
+{% block scripts %}{% if result.ready %}
+<script src="{% static 'vendor/chartjs/chart.umd.js' %}"></script>
+<script src="{% static 'js/optimizer.js' %}"></script>
+{% endif %}{% endblock %}
