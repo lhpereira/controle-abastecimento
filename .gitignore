@@ -154,6 +154,15 @@ activemq-data/
 # Controle de Abastecimento — dados locais e artefatos
 /data/
 /staticfiles/
+# Dados pessoais: exportações, planilhas e backups do banco (o repositório é público)
+/*.csv
+/*.xlsx
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+# Metadados que o Windows cria em arquivos baixados
+*:Zone.Identifier
 /.coverage
 /.pytest_cache/
 

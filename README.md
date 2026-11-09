@@ -13,20 +13,28 @@ O projeto reproduz a lógica validada na planilha **Controle Abastecimento**: ca
 - Dashboard responsivo com gráficos de eficiência, custo e composição.
 - Otimizador por tipo de trajeto, com requisito mínimo de cobertura da amostra.
 - Importação de JSON, XLSX e CSV.
-- Exportação para CSV e download de backup SQLite.
+- Exportação para CSV e download de backup SQLite (somente superusuário).
 - Execução em um único container Docker.
 
 ## Executar com Docker
 
 1. Copie `.env.example` para `.env`.
-2. Troque `DJANGO_SECRET_KEY` por uma chave longa e aleatória.
+2. Troque `DJANGO_SECRET_KEY` por uma chave longa e aleatória. Sem isso o container não sobe:
+   a aplicação recusa chaves ausentes, curtas ou iguais ao exemplo do repositório.
+
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+   ```
+
 3. Execute:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Acesse `http://localhost:8000`.
+4. Crie o seu usuário (veja [Acesso](#acesso)) e acesse `http://localhost:8000`.
+
+Por padrão a porta é publicada só em `127.0.0.1`. Para acessar pela rede local, defina `APP_BIND=0.0.0.0` no `.env`.
 
 Para acompanhar a inicialização:
 
@@ -44,7 +52,9 @@ Requer Python 3.12 ou superior.
 python -m venv .venv
 .venv/Scripts/activate
 pip install -r requirements.txt
+export DJANGO_DEBUG=True   # PowerShell: $env:DJANGO_DEBUG="True"
 python manage.py migrate
+python manage.py createsuperuser
 python manage.py runserver
 ```
 
@@ -73,25 +83,65 @@ Para conferir um snapshot JSON contra os resultados calculados:
 python manage.py validate_snapshot caminho/abastecimentos.json
 ```
 
-## Acesso protegido
+## Acesso
 
-Por padrão, o MVP é destinado ao uso local. Para exigir autenticação:
-
-1. Defina `APP_REQUIRE_LOGIN=True` no `.env`.
-2. Crie um usuário administrativo:
+Todas as telas exigem login, e apenas `/health/` é pública. Para criar o seu usuário:
 
 ```bash
 docker compose exec app python manage.py createsuperuser
 ```
 
-Se a aplicação for exposta à internet, também use HTTPS por meio de um proxy reverso, mantenha `DJANGO_DEBUG=False` e restrinja `DJANGO_ALLOWED_HOSTS`.
+- O botão **Sair** fica no menu superior.
+- Depois de 5 senhas erradas, o IP de origem fica bloqueado por 1 hora. Os valores são configuráveis em `AXES_FAILURE_LIMIT` e `AXES_COOLOFF_MINUTES`. Para desbloquear antes do prazo:
+
+  ```bash
+  docker compose exec app python manage.py axes_reset
+  ```
+
+- Não existe redefinição de senha por e-mail. Para trocar a senha, use `python manage.py changepassword <usuário>`.
+
+### Cloudflare Tunnel
+
+O TLS termina na Cloudflare, e o `cloudflared` entrega HTTP ao app. Para esse cenário, configure no `.env`:
+
+```env
+APP_BEHIND_CLOUDFLARE=True
+DJANGO_ALLOWED_HOSTS=seu.dominio.com.br,localhost,127.0.0.1
+DJANGO_CSRF_TRUSTED_ORIGINS=https://seu.dominio.com.br
+```
+
+Com isso, os cookies passam a ser `Secure`, o app reconhece o HTTPS pelo `X-Forwarded-Proto` e o bloqueio de força bruta usa o IP real do visitante (`CF-Connecting-IP`), e não o IP do `cloudflared`.
+
+- O `CF-Connecting-IP` só é aceito em conexões vindas de endereços internos (loopback, redes Docker e LAN). Mantenha `APP_BIND=127.0.0.1` quando o `cloudflared` roda no mesmo host.
+- No painel da Cloudflare, ative **Always Use HTTPS**. Ative também o HSTS, no painel ou com `SECURE_HSTS_SECONDS` no `.env`.
+- Recomendado para uso pessoal: proteja o hostname com **Cloudflare Access** (Zero Trust → Access → Applications), com política liberando só o seu e-mail. Assim a Cloudflare exige um código por e-mail antes de qualquer requisição chegar ao app, o que soma uma segunda camada ao login. Se usar Access, libere `/health/` apenas se tiver monitoramento externo.
+- A Content Security Policy do app bloqueia scripts externos. Recursos da Cloudflare que injetam JavaScript na página (Rocket Loader, Web Analytics automático, Email Obfuscation) deixarão de funcionar; mantenha-os desligados para este hostname.
 
 ## Dados e backups
 
-- `data/db.sqlite3`: banco local fora do Git.
-- `/backup/`: baixa uma cópia consistente do banco pelo navegador.
+- `data/db.sqlite3` (ou o volume Docker `fuel_data`): banco local, fora do Git.
 - `/exportar/csv/`: exporta o histórico em formato tabular.
 - `.env`: configuração local e segredos, ignorados pelo Git.
+
+### Backup
+
+Hoje o backup é **manual**: não há rotina agendada. Em **Configurações → Baixar backup SQLite** (`/backup/`, visível só para superusuário), o app gera uma cópia consistente do banco e a entrega como download:
+
+- a cópia inclui abastecimentos, veículo e usuários (com as senhas em hash);
+- as sessões de login e o registro de tentativas de acesso são esvaziados, porque a chave de sessão é o próprio cookie de login e quem tivesse o arquivo poderia entrar como você;
+- a resposta não é guardada em cache (`Cache-Control: no-store`).
+
+O volume Docker sobrevive à recriação do container, mas não substitui um backup fora da máquina. Guarde os arquivos baixados num local cifrado. A variável `BACKUP_DIR` está reservada para uma futura rotina automática e ainda não é usada.
+
+Para restaurar um arquivo baixado:
+
+```bash
+docker compose stop app
+docker compose cp controle-abastecimento-AAAA-MM-DD.sqlite3 app:/app/data/db.sqlite3
+docker compose start app
+```
+
+Depois da restauração, é preciso fazer login de novo (as sessões não fazem parte do backup).
 
 O repositório é público. Não publique o banco SQLite, exportações da planilha ou arquivos de backup.
 
@@ -99,8 +149,10 @@ O repositório é público. Não publique o banco SQLite, exportações da plani
 
 ```bash
 python manage.py test
-python manage.py check
+DJANGO_SECRET_KEY=<chave> APP_BEHIND_CLOUDFLARE=True python manage.py check --deploy
 ```
+
+`manage.py test` não precisa de `.env`: usa uma chave descartável e arquivos estáticos sem manifest.
 
 ## Estrutura
 
@@ -108,7 +160,7 @@ python manage.py check
 config/                 Configuração do Django
 fuelings/               Modelos, cálculos, telas e importadores
 templates/              Interface HTML
-static/                 Estilos da aplicação
+static/                 Estilos, JavaScript e Chart.js (vendor/, versão 4.4.7 do npm)
 scripts/entrypoint.sh    Inicialização do container
 compose.yaml             Serviço único e volume SQLite
 ```
