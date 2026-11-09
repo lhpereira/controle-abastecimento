@@ -168,6 +168,18 @@ docker compose start app
 
 Depois da restauração, é preciso fazer login de novo (as sessões não fazem parte do backup).
 
+### Valores fora do comum e recuperação
+
+O formulário pede confirmação quando um ciclo foge do esperado: menos de 1 ou mais de 2.000 km desde o abastecimento anterior, ou consumo fora da faixa de 2 a 40 km/L. Esses casos quase sempre são erro de digitação no hodômetro ou nos litros. Preços fora da faixa de R$ 0,50 a R$ 30,00 são recusados.
+
+Mesmo com a confirmação, a aplicação recusa qualquer gravação cujo valor calculado não caiba no banco. Versões anteriores aceitavam esses valores, e todas as telas passavam a dar erro 500. Se isso acontecer com um banco antigo, rode:
+
+```bash
+docker compose exec app python manage.py repair_derived
+```
+
+O comando limpa os valores calculados e refaz a sequência. Se um registro continuar impedindo o cálculo, o comando informa qual é e como corrigi-lo pela tela de edição ou excluí-lo (`repair_derived --delete <id>`).
+
 O repositório é público. Não publique o banco SQLite, exportações da planilha ou arquivos de backup.
 
 ## Testes

@@ -1,7 +1,17 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+
+# Faixa aceita para o preço por litro na bomba. Fora dela, quase sempre é erro de digitação
+# (ex.: 0,001 ou 6390) e o cálculo resultante não cabe nas colunas derivadas (DAD-01).
+PUMP_PRICE_MESSAGE = "Informe um preço por litro entre R$ 0,50 e R$ 30,00."
+PUMP_PRICE_VALIDATORS = [
+    MinValueValidator(Decimal("0.50"), message=PUMP_PRICE_MESSAGE),
+    MaxValueValidator(Decimal("30"), message=PUMP_PRICE_MESSAGE),
+]
 
 
 class Vehicle(models.Model):
@@ -87,9 +97,13 @@ class Fueling(models.Model):
         "Tipo de gasolina", max_length=20, choices=GasolineType.choices, default=GasolineType.COMMON
     )
     gasoline_liters = models.DecimalField("Litros de gasolina", max_digits=7, decimal_places=3, default=0)
-    gasoline_price = models.DecimalField("Preço da gasolina", max_digits=7, decimal_places=3)
+    gasoline_price = models.DecimalField(
+        "Preço da gasolina", max_digits=7, decimal_places=3, validators=PUMP_PRICE_VALIDATORS
+    )
     ethanol_liters = models.DecimalField("Litros de etanol", max_digits=7, decimal_places=3, default=0)
-    ethanol_price = models.DecimalField("Preço do etanol", max_digits=7, decimal_places=3)
+    ethanol_price = models.DecimalField(
+        "Preço do etanol", max_digits=7, decimal_places=3, validators=PUMP_PRICE_VALIDATORS
+    )
     anhydrous_rate = models.DecimalField(
         "Teor de etanol anidro na gasolina C", max_digits=5, decimal_places=4, default=Decimal("0.30")
     )
@@ -101,11 +115,11 @@ class Fueling(models.Model):
     tank_cost_per_liter = models.DecimalField(max_digits=9, decimal_places=6, null=True, editable=False)
     gas_c_tank_share = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     distance_km = models.IntegerField(null=True, editable=False)
-    efficiency_km_l = models.DecimalField(max_digits=9, decimal_places=6, null=True, editable=False)
+    efficiency_km_l = models.DecimalField(max_digits=10, decimal_places=6, null=True, editable=False)
     burned_gas_c_share = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     burned_price_per_liter = models.DecimalField(max_digits=9, decimal_places=6, null=True, editable=False)
     cost_per_km = models.DecimalField(max_digits=9, decimal_places=6, null=True, editable=False)
-    price_ratio = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
+    price_ratio = models.DecimalField(max_digits=12, decimal_places=8, null=True, editable=False)
     days_since_previous = models.IntegerField(null=True, editable=False)
     gasoline_a_tank_share = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     ethanol_anhydrous_tank_share = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
@@ -114,7 +128,7 @@ class Fueling(models.Model):
     burned_ethanol_total_share = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     applicable_limit = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     recommendation = models.CharField(max_length=20, choices=Recommendation.choices, blank=True, editable=False)
-    margin_to_limit = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
+    margin_to_limit = models.DecimalField(max_digits=12, decimal_places=8, null=True, editable=False)
     personal_limit = models.DecimalField(max_digits=9, decimal_places=8, null=True, editable=False)
     mix_band = models.CharField(max_length=24, choices=MixBand.choices, blank=True, editable=False)
 

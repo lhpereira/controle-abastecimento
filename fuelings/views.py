@@ -14,7 +14,7 @@ from .backup import sanitized_sqlite_backup
 from .forms import FuelingForm, OptimizerForm, VehicleForm
 from .models import Fueling
 from .security import csv_safe
-from .services import get_default_vehicle, recalculate_all
+from .services import DerivedValueOutOfRange, get_default_vehicle, recalculate_all
 
 
 def superuser_required(view):
@@ -53,11 +53,19 @@ def fueling_form(request, pk=None):
     instance = get_object_or_404(Fueling, pk=pk, vehicle=vehicle) if pk else None
     form = FuelingForm(request.POST or None, instance=instance, vehicle=vehicle)
     if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            row = form.save()
-            recalculate_all(vehicle)
-        messages.success(request, "Abastecimento salvo e sequência recalculada.")
-        return redirect("fueling_detail", pk=row.pk)
+        try:
+            with transaction.atomic():
+                row = form.save()
+                recalculate_all(vehicle)
+        except DerivedValueOutOfRange as error:
+            # A transação foi desfeita: nada foi gravado. Mostra o motivo no formulário.
+            if instance is None:
+                form.instance.pk = None
+                form.instance._state.adding = True
+            form.add_error(None, error)
+        else:
+            messages.success(request, "Abastecimento salvo e sequência recalculada.")
+            return redirect("fueling_detail", pk=row.pk)
     return render(
         request,
         "fuelings/fueling_form.html",
@@ -69,9 +77,13 @@ def fueling_delete(request, pk):
     vehicle = get_default_vehicle()
     row = get_object_or_404(Fueling, pk=pk, vehicle=vehicle)
     if request.method == "POST":
-        with transaction.atomic():
-            row.delete()
-            recalculate_all(vehicle)
+        try:
+            with transaction.atomic():
+                row.delete()
+                recalculate_all(vehicle)
+        except DerivedValueOutOfRange as error:
+            messages.error(request, f"O abastecimento não foi excluído. {error.message}")
+            return redirect("fueling_detail", pk=pk)
         messages.success(request, "Abastecimento removido e sequência recalculada.")
         return redirect("fueling_list")
     return render(request, "fuelings/fueling_confirm_delete.html", {"row": row})
@@ -81,11 +93,15 @@ def vehicle_settings(request):
     vehicle = get_default_vehicle()
     form = VehicleForm(request.POST or None, instance=vehicle)
     if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            vehicle = form.save()
-            recalculate_all(vehicle)
-        messages.success(request, "Configurações atualizadas e histórico recalculado.")
-        return redirect("vehicle_settings")
+        try:
+            with transaction.atomic():
+                vehicle = form.save()
+                recalculate_all(vehicle)
+        except DerivedValueOutOfRange as error:
+            form.add_error(None, f"As configurações não foram salvas. {error.message}")
+        else:
+            messages.success(request, "Configurações atualizadas e histórico recalculado.")
+            return redirect("vehicle_settings")
     return render(request, "fuelings/vehicle_settings.html", {"form": form, "vehicle": vehicle})
 
 

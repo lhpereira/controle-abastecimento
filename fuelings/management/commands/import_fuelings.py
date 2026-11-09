@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from fuelings.models import Fueling
-from fuelings.services import get_default_vehicle, recalculate_all
+from fuelings.services import DerivedValueOutOfRange, get_default_vehicle, recalculate_all
 
 
 def excel_date(value):
@@ -113,5 +113,9 @@ class Command(BaseCommand):
             )
             imported += 1
 
-        recalculate_all(vehicle)
+        try:
+            recalculate_all(vehicle)
+        except DerivedValueOutOfRange as error:
+            # A importação inteira é desfeita (handle é atômico): o banco fica como estava.
+            raise CommandError(f"Importação cancelada. {error.message}") from error
         self.stdout.write(self.style.SUCCESS(f"{imported} abastecimentos importados e recalculados."))

@@ -1,7 +1,8 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 
 from .models import Fueling, Vehicle
 
@@ -32,6 +33,74 @@ DERIVED_FIELDS = [
     "personal_limit",
     "mix_band",
 ]
+
+
+FIELD_LABELS = {
+    "total_liters": "total de litros",
+    "amount_paid": "valor pago",
+    "tank_cost_per_liter": "custo médio do tanque",
+    "gas_c_tank_share": "participação de gasolina C no tanque",
+    "efficiency_km_l": "consumo (km/L)",
+    "burned_gas_c_share": "gasolina C consumida",
+    "burned_price_per_liter": "preço do litro consumido",
+    "cost_per_km": "custo por km",
+    "price_ratio": "relação etanol/gasolina",
+    "gasoline_a_tank_share": "participação de gasolina A",
+    "ethanol_anhydrous_tank_share": "participação de etanol anidro",
+    "ethanol_hydrated_tank_share": "participação de etanol hidratado",
+    "ethanol_total_tank_share": "participação total de etanol",
+    "burned_ethanol_total_share": "etanol consumido",
+    "applicable_limit": "limite aplicável",
+    "margin_to_limit": "margem até o limite",
+    "personal_limit": "limite pessoal",
+}
+
+
+class DerivedValueOutOfRange(ValidationError):
+    """Um valor calculado não cabe na coluna do banco.
+
+    O SQLite grava o valor mesmo assim, mas o Django falha ao lê-lo de volta, o que
+    derrubaria todas as telas (DAD-01). O recálculo é desfeito e o erro chega ao usuário.
+    """
+
+    def __init__(self, row, field_name, value):
+        self.row_id = row.pk
+        self.odometer_km = row.odometer_km
+        self.field_name = field_name
+        odometer = f"{row.odometer_km:,}".replace(",", ".")
+        super().__init__(
+            f"O abastecimento de {row.date:%d/%m/%Y} (hodômetro {odometer} km) resultaria em "
+            f"{FIELD_LABELS.get(field_name, field_name)} = {value:.2f}, valor fora da faixa que o "
+            "sistema consegue armazenar. Confira o hodômetro, os litros e os preços.",
+            code="derived_out_of_range",
+        )
+
+
+def _decimal_limit(field: models.DecimalField) -> Decimal:
+    return Decimal(10) ** (field.max_digits - field.decimal_places)
+
+
+DECIMAL_DERIVED_FIELDS = {
+    name: Fueling._meta.get_field(name)
+    for name in DERIVED_FIELDS
+    if isinstance(Fueling._meta.get_field(name), models.DecimalField)
+}
+
+
+def ensure_storable(row, field_names=DECIMAL_DERIVED_FIELDS) -> None:
+    """Garante que cada valor derivado cabe na coluna após o arredondamento do banco.
+
+    Não altera os valores em memória, para não mudar a precisão usada no ciclo seguinte.
+    """
+    for name in field_names:
+        value = getattr(row, name)
+        if value is None:
+            continue
+        field = DECIMAL_DERIVED_FIELDS[name]
+        limit = _decimal_limit(field)
+        # Compara antes de arredondar: quantize() falharia com números enormes.
+        if abs(value) >= limit or abs(value.quantize(Decimal(1).scaleb(-field.decimal_places))) >= limit:
+            raise DerivedValueOutOfRange(row, name, value)
 
 
 def get_default_vehicle() -> Vehicle:
@@ -128,6 +197,7 @@ def recalculate_all(vehicle: Vehicle) -> None:
             row.ethanol_anhydrous_tank_share + row.ethanol_hydrated_tank_share
         )
         row.personal_limit = None
+        ensure_storable(row)
         row.save(update_fields=DERIVED_FIELDS + ["updated_at"])
         previous = row
 
@@ -152,4 +222,5 @@ def recalculate_all(vehicle: Vehicle) -> None:
 
     for row in rows:
         row.personal_limit = personal.get(row.route)
+        ensure_storable(row, ["personal_limit"])
         row.save(update_fields=["personal_limit", "updated_at"])
